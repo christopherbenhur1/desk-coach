@@ -40,8 +40,9 @@ export default function PoseWebcam({ onPose }: PoseWebcamProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [landmarks, setLandmarks] = useState<any[]>([]);
-  const [neckFlexion, setNeckFlexion] = useState<{angle: number, status: string} | null>(null);
-  const [cva, setCVA] = useState<{angle: number, status: string} | null>(null); // CVA state
+  const [neckFlexion, setNeckFlexion] = useState<{angle: number, status: string, confidence: number} | null>(null);
+  const [cva, setCVA] = useState<{angle: number, status: string, confidence: number} | null>(null); // CVA state
+  const [fsa, setFSA] = useState<{angle: number, status: string, confidence: number} | null>(null); // FSA state
   const [calibration, setCalibration] = useState<number | null>(null);
   const calibrationRef = useRef<number | null>(null); // <-- add ref for calibration
 
@@ -123,18 +124,27 @@ export default function PoseWebcam({ onPose }: PoseWebcamProps) {
         const leftEye = results.poseLandmarks[1];
         const rightEye = results.poseLandmarks[2];
         let midEar = null, midEye = null;
+        let flexionConf = 0;
         if (leftEar && rightEar) {
           midEar = {
             x: (leftEar.x + rightEar.x) / 2,
             y: (leftEar.y + rightEar.y) / 2,
           };
+          // Confidence: average visibility of leftEar and rightEar
+          flexionConf += (leftEar.visibility ?? 0) / 2;
+          flexionConf += (rightEar.visibility ?? 0) / 2;
         }
         if (leftEye && rightEye) {
           midEye = {
             x: (leftEye.x + rightEye.x) / 2,
             y: (leftEye.y + rightEye.y) / 2,
           };
+          // Confidence: average visibility of leftEye and rightEye
+          flexionConf += (leftEye.visibility ?? 0) / 2;
+          flexionConf += (rightEye.visibility ?? 0) / 2;
         }
+        // Average over 4 landmarks
+        flexionConf = flexionConf / 2;
         let flexionAngle = null;
         if (midEar && midEye) {
           flexionAngle = angleToVertical(midEar, midEye);
@@ -152,9 +162,10 @@ export default function PoseWebcam({ onPose }: PoseWebcamProps) {
           else if (calibratedAngle <= 20) status = 'Warn';
           else status = 'Alert';
         }
-        setNeckFlexion(calibratedAngle !== null ? { angle: calibratedAngle, status } : null);
+        setNeckFlexion(calibratedAngle !== null ? { angle: calibratedAngle, status, confidence: flexionConf } : null);
         // --- CVA (Cranio-Vertebral Angle) ---
         let cvaAngle = null;
+        let cvaConf = 0;
         if (neck && midEar) {
           const dx = midEar.x - neck.x;
           const dy = midEar.y - neck.y;
@@ -163,6 +174,16 @@ export default function PoseWebcam({ onPose }: PoseWebcamProps) {
             const angleRad = Math.atan2(-(dy), dx); // negative dy: y increases downward
             cvaAngle = Math.abs((angleRad * 180) / Math.PI);
           }
+          // Confidence: average visibility of leftEar, rightEar, leftShoulder, rightShoulder
+          const leftShoulder = results.poseLandmarks[11];
+          const rightShoulder = results.poseLandmarks[12];
+          let count = 0;
+          let sum = 0;
+          if (leftEar) { sum += leftEar.visibility ?? 0; count++; }
+          if (rightEar) { sum += rightEar.visibility ?? 0; count++; }
+          if (leftShoulder) { sum += leftShoulder.visibility ?? 0; count++; }
+          if (rightShoulder) { sum += rightShoulder.visibility ?? 0; count++; }
+          cvaConf = count > 0 ? sum / count : 0;
         }
         let cvaStatus = '';
         if (cvaAngle !== null) {
@@ -170,7 +191,39 @@ export default function PoseWebcam({ onPose }: PoseWebcamProps) {
           else if (cvaAngle >= 44) cvaStatus = 'Warn';
           else cvaStatus = 'Alert';
         }
-        setCVA(cvaAngle !== null ? { angle: cvaAngle, status: cvaStatus } : null);
+        setCVA(cvaAngle !== null ? { angle: cvaAngle, status: cvaStatus, confidence: cvaConf } : null);
+        // --- Forward-Shoulder Angle (FSA) ---
+        let fsaAngle = null;
+        let fsaConf = 0;
+        let fsaCount = 0;
+        // For FSA, use leftShoulder, rightShoulder (for neck), and leftHip (for visibility)
+        const leftHipPt = results.poseLandmarks[23]; // Use different variable name to avoid conflict
+        if (neck && leftShoulderPt) {
+          // C7 is approximated as neck (midpoint of shoulders)
+          // Acromion is left shoulder landmark
+          const dx = leftShoulderPt.x - neck.x;
+          const dy = leftShoulderPt.y - neck.y;
+          const mag = Math.sqrt(dx*dx + dy*dy);
+          if (mag !== 0) {
+            // Vertical vector is (0, -1)
+            const dot = (dx * 0) + (dy * -1);
+            const angleRad = Math.acos(dot / mag);
+            fsaAngle = Math.abs((angleRad * 180) / Math.PI);
+          }
+          // Confidence: average visibility of leftShoulder, rightShoulder, and leftHip
+          const rightShoulder = results.poseLandmarks[12];
+          if (leftShoulderPt) { fsaConf += leftShoulderPt.visibility ?? 0; fsaCount++; }
+          if (rightShoulder) { fsaConf += rightShoulder.visibility ?? 0; fsaCount++; }
+          if (leftHipPt) { fsaConf += leftHipPt.visibility ?? 0; fsaCount++; }
+          fsaConf = fsaCount > 0 ? fsaConf / fsaCount : 0;
+        }
+        let fsaStatus = '';
+        if (fsaAngle !== null) {
+          if (fsaAngle <= 15) fsaStatus = 'Good';
+          else if (fsaAngle <= 20) fsaStatus = 'Warn';
+          else fsaStatus = 'Alert';
+        }
+        setFSA(fsaAngle !== null ? { angle: fsaAngle, status: fsaStatus, confidence: fsaConf } : null);
         canvasCtx!.fillStyle = '#00FF00';
         canvasCtx!.strokeStyle = '#00FF00';
         canvasCtx!.lineWidth = 2;
@@ -291,6 +344,9 @@ export default function PoseWebcam({ onPose }: PoseWebcamProps) {
                 <Typography variant="subtitle1" sx={{ color: neckFlexion.status === 'Good' ? '#4caf50' : neckFlexion.status === 'Warn' ? '#ff9800' : '#f44336' }}>
                   {neckFlexion.status}
                 </Typography>
+                <Typography variant="caption" sx={{ color: '#90caf9' }}>
+                  Confidence: {(neckFlexion.confidence * 100).toFixed(0)}%
+                </Typography>
               </>
             ) : (
               <Typography variant="body2" color="text.secondary">Not detected</Typography>
@@ -305,6 +361,27 @@ export default function PoseWebcam({ onPose }: PoseWebcamProps) {
                 </Typography>
                 <Typography variant="subtitle1" sx={{ color: cva.status === 'Good' ? '#4caf50' : cva.status === 'Warn' ? '#ff9800' : '#f44336' }}>
                   {cva.status}
+                </Typography>
+                <Typography variant="caption" sx={{ color: '#90caf9' }}>
+                  Confidence: {(cva.confidence * 100).toFixed(0)}%
+                </Typography>
+              </>
+            ) : (
+              <Typography variant="body2" color="text.secondary">Not detected</Typography>
+            )}
+          </Paper>
+          <Paper sx={{ p: 2, minWidth: 160, maxWidth: 220, flex: 1, background: '#23272b', color: '#fff', textAlign: 'center', boxShadow: 2 }}>
+            <Typography variant="h6" sx={{ mb: 1 }}>Forward-Shoulder Angle (FSA)</Typography>
+            {fsa ? (
+              <>
+                <Typography variant="h4" sx={{ color: fsa.status === 'Good' ? '#4caf50' : fsa.status === 'Warn' ? '#ff9800' : '#f44336', fontWeight: 700 }}>
+                  {fsa.angle.toFixed(1)}°
+                </Typography>
+                <Typography variant="subtitle1" sx={{ color: fsa.status === 'Good' ? '#4caf50' : fsa.status === 'Warn' ? '#ff9800' : '#f44336' }}>
+                  {fsa.status}
+                </Typography>
+                <Typography variant="caption" sx={{ color: '#90caf9' }}>
+                  Confidence: {(fsa.confidence * 100).toFixed(0)}%
                 </Typography>
               </>
             ) : (
