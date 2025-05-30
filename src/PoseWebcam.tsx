@@ -8,6 +8,9 @@ import TableContainer from '@mui/material/TableContainer';
 import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import Paper from '@mui/material/Paper';
+import Box from '@mui/material/Box';
+import Typography from '@mui/material/Typography';
+import Button from '@mui/material/Button';
 
 // Indices for upper body landmarks in MediaPipe Pose
 const UPPER_BODY_LANDMARKS = [
@@ -37,6 +40,27 @@ export default function PoseWebcam({ onPose }: PoseWebcamProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [landmarks, setLandmarks] = useState<any[]>([]);
+  const [neckFlexion, setNeckFlexion] = useState<{angle: number, status: string} | null>(null);
+  const [calibration, setCalibration] = useState<number | null>(null);
+  const calibrationRef = useRef<number | null>(null); // <-- add ref for calibration
+
+  // Keep calibrationRef in sync with calibration state
+  useEffect(() => {
+    calibrationRef.current = calibration;
+  }, [calibration]);
+
+  // Helper: calculate angle between two points and vertical (in degrees, 0° = upright)
+  function angleToVertical(a: any, b: any) {
+    if (!a || !b) return null;
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const mag = Math.sqrt(dx*dx + dy*dy);
+    if (mag === 0) return null;
+    // Vertical vector is (0, -1) (upwards in image coordinates)
+    const dot = (dx * 0) + (dy * -1);
+    const angleRad = Math.acos(dot / mag);
+    return Math.abs((angleRad * 180) / Math.PI);
+  }
 
   useEffect(() => {
     let camera: Camera | null = null;
@@ -64,6 +88,43 @@ export default function PoseWebcam({ onPose }: PoseWebcamProps) {
       // Draw upper body landmarks
       if (results.poseLandmarks) {
         setLandmarks(results.poseLandmarks);
+        // --- Head/neck flexion (pitch) ---
+        // Mid-ear (average of left/right ear)
+        const leftEar = results.poseLandmarks[7];
+        const rightEar = results.poseLandmarks[8];
+        const leftEye = results.poseLandmarks[1];
+        const rightEye = results.poseLandmarks[2];
+        let midEar = null, midEye = null;
+        if (leftEar && rightEar) {
+          midEar = {
+            x: (leftEar.x + rightEar.x) / 2,
+            y: (leftEar.y + rightEar.y) / 2,
+          };
+        }
+        if (leftEye && rightEye) {
+          midEye = {
+            x: (leftEye.x + rightEye.x) / 2,
+            y: (leftEye.y + rightEye.y) / 2,
+          };
+        }
+        let flexionAngle = null;
+        if (midEar && midEye) {
+          flexionAngle = angleToVertical(midEar, midEye);
+        }
+        // --- Use calibrationRef.current for always-up-to-date calibration ---
+        let calibratedAngle = flexionAngle;
+        // Use calibrationRef to always get latest value
+        const currentCalibration = calibrationRef.current;
+        if (flexionAngle !== null && currentCalibration !== null) {
+          calibratedAngle = flexionAngle - currentCalibration;
+        }
+        let status = '';
+        if (calibratedAngle !== null) {
+          if (calibratedAngle <= 15) status = 'Good';
+          else if (calibratedAngle <= 20) status = 'Warn';
+          else status = 'Alert';
+        }
+        setNeckFlexion(calibratedAngle !== null ? { angle: calibratedAngle, status } : null);
         canvasCtx!.fillStyle = '#00FF00';
         canvasCtx!.strokeStyle = '#00FF00';
         canvasCtx!.lineWidth = 2;
@@ -78,10 +139,10 @@ export default function PoseWebcam({ onPose }: PoseWebcamProps) {
         }
         // Draw simple solid lines for spine and head/neck connections
         // Define indices for neck, ears, eyes, shoulders, hips
-        const leftEar = 7;
-        const rightEar = 8;
-        const leftEye = 1;
-        const rightEye = 2;
+        const leftEarIdx = 7;
+        const rightEarIdx = 8;
+        const leftEyeIdx = 1;
+        const rightEyeIdx = 2;
         const nose = 0;
         const leftShoulder = 11;
         const rightShoulder = 12;
@@ -115,7 +176,7 @@ export default function PoseWebcam({ onPose }: PoseWebcamProps) {
               canvasCtx!.restore();
             }
           };
-          [leftEar, rightEar, leftEye, rightEye, nose].forEach(drawToNeck);
+          [leftEarIdx, rightEarIdx, leftEyeIdx, rightEyeIdx, nose].forEach(drawToNeck);
           // Draw neck to shoulders
           const leftShoulderPt = results.poseLandmarks[leftShoulder];
           const rightShoulderPt = results.poseLandmarks[rightShoulder];
@@ -189,6 +250,63 @@ export default function PoseWebcam({ onPose }: PoseWebcamProps) {
         <video ref={videoRef} style={{ display: 'none' }} width={480} height={360} />
         <canvas ref={canvasRef} width={480} height={360} style={{ position: 'absolute', top: 0, left: 0 }} />
       </div>
+      <Box sx={{ width: '100%', display: 'flex', justifyContent: 'center', mb: 2, flexDirection: 'column', alignItems: 'center' }}>
+        <Paper sx={{ p: 2, minWidth: 320, maxWidth: 400, background: '#23272b', color: '#fff', textAlign: 'center', boxShadow: 2, mb: 2 }}>
+          <Typography variant="h6" sx={{ mb: 1 }}>Head/Neck Flexion (Pitch)</Typography>
+          {neckFlexion ? (
+            <>
+              <Typography variant="h4" sx={{ color: neckFlexion.status === 'Good' ? '#4caf50' : neckFlexion.status === 'Warn' ? '#ff9800' : '#f44336', fontWeight: 700 }}>
+                {neckFlexion.angle.toFixed(1)}°
+              </Typography>
+              <Typography variant="subtitle1" sx={{ color: neckFlexion.status === 'Good' ? '#4caf50' : neckFlexion.status === 'Warn' ? '#ff9800' : '#f44336' }}>
+                {neckFlexion.status}
+              </Typography>
+            </>
+          ) : (
+            <Typography variant="body2" color="text.secondary">Not detected</Typography>
+          )}
+        </Paper>
+        <Button
+          variant="contained"
+          color="primary"
+          sx={{ mt: 1, background: '#1976d2' }}
+          onClick={() => {
+            // Use the latest measured flexion angle as calibration
+            if (neckFlexion && neckFlexion.angle !== null && landmarks.length > 0) {
+              // Recompute raw angle (not calibrated)
+              const leftEar = landmarks[7];
+              const rightEar = landmarks[8];
+              const leftEye = landmarks[1];
+              const rightEye = landmarks[2];
+              let midEar = null, midEye = null;
+              if (leftEar && rightEar) {
+                midEar = {
+                  x: (leftEar.x + rightEar.x) / 2,
+                  y: (leftEar.y + rightEar.y) / 2,
+                };
+              }
+              if (leftEye && rightEye) {
+                midEye = {
+                  x: (leftEye.x + rightEye.x) / 2,
+                  y: (leftEye.y + rightEye.y) / 2,
+                };
+              }
+              let flexionAngle = null;
+              if (midEar && midEye) {
+                flexionAngle = angleToVertical(midEar, midEye);
+              }
+              if (flexionAngle !== null) setCalibration(flexionAngle);
+            }
+          }}
+        >
+          Set Upright Calibration
+        </Button>
+        {calibration !== null && (
+          <Typography variant="caption" sx={{ color: '#90caf9', mt: 1 }}>
+            Upright calibrated at {calibration.toFixed(1)}°
+          </Typography>
+        )}
+      </Box>
       <TableContainer component={Paper} sx={{ maxHeight: 360, minWidth: 480, width: 520, flex: '0 1 520px', background: '#222', boxShadow: 3 }}>
         <Table stickyHeader size="small" aria-label="pose landmarks table">
           <TableHead>
