@@ -49,6 +49,22 @@ export default function PoseWebcam({ onPose }: PoseWebcamProps) {
     calibrationRef.current = calibration;
   }, [calibration]);
 
+  // On mount, load calibration from localStorage if available
+  useEffect(() => {
+    const saved = localStorage.getItem('deskcoach-neck-calibration');
+    if (saved !== null) {
+      const val = parseFloat(saved);
+      if (!isNaN(val)) setCalibration(val);
+    }
+  }, []);
+
+  // When calibration changes, save to localStorage
+  useEffect(() => {
+    if (calibration !== null) {
+      localStorage.setItem('deskcoach-neck-calibration', calibration.toString());
+    }
+  }, [calibration]);
+
   // Helper: calculate angle between two points and vertical (in degrees, 0° = upright)
   function angleToVertical(a: any, b: any) {
     if (!a || !b) return null;
