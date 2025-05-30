@@ -41,6 +41,7 @@ export default function PoseWebcam({ onPose }: PoseWebcamProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [landmarks, setLandmarks] = useState<any[]>([]);
   const [neckFlexion, setNeckFlexion] = useState<{angle: number, status: string} | null>(null);
+  const [cva, setCVA] = useState<{angle: number, status: string} | null>(null); // CVA state
   const [calibration, setCalibration] = useState<number | null>(null);
   const calibrationRef = useRef<number | null>(null); // <-- add ref for calibration
 
@@ -104,6 +105,17 @@ export default function PoseWebcam({ onPose }: PoseWebcamProps) {
       // Draw upper body landmarks
       if (results.poseLandmarks) {
         setLandmarks(results.poseLandmarks);
+        // Calculate neck (midpoint of shoulders) for use in metrics and drawing
+        let neck = null;
+        const leftShoulderPt = results.poseLandmarks[11];
+        const rightShoulderPt = results.poseLandmarks[12];
+        if (leftShoulderPt && rightShoulderPt) {
+          neck = {
+            x: (leftShoulderPt.x + rightShoulderPt.x) / 2,
+            y: (leftShoulderPt.y + rightShoulderPt.y) / 2,
+            z: (leftShoulderPt.z + rightShoulderPt.z) / 2,
+          };
+        }
         // --- Head/neck flexion (pitch) ---
         // Mid-ear (average of left/right ear)
         const leftEar = results.poseLandmarks[7];
@@ -141,6 +153,24 @@ export default function PoseWebcam({ onPose }: PoseWebcamProps) {
           else status = 'Alert';
         }
         setNeckFlexion(calibratedAngle !== null ? { angle: calibratedAngle, status } : null);
+        // --- CVA (Cranio-Vertebral Angle) ---
+        let cvaAngle = null;
+        if (neck && midEar) {
+          const dx = midEar.x - neck.x;
+          const dy = midEar.y - neck.y;
+          const mag = Math.sqrt(dx*dx + dy*dy);
+          if (mag !== 0) {
+            const angleRad = Math.atan2(-(dy), dx); // negative dy: y increases downward
+            cvaAngle = Math.abs((angleRad * 180) / Math.PI);
+          }
+        }
+        let cvaStatus = '';
+        if (cvaAngle !== null) {
+          if (cvaAngle >= 48) cvaStatus = 'Good';
+          else if (cvaAngle >= 44) cvaStatus = 'Warn';
+          else cvaStatus = 'Alert';
+        }
+        setCVA(cvaAngle !== null ? { angle: cvaAngle, status: cvaStatus } : null);
         canvasCtx!.fillStyle = '#00FF00';
         canvasCtx!.strokeStyle = '#00FF00';
         canvasCtx!.lineWidth = 2;
@@ -160,23 +190,8 @@ export default function PoseWebcam({ onPose }: PoseWebcamProps) {
         const leftEyeIdx = 1;
         const rightEyeIdx = 2;
         const nose = 0;
-        const leftShoulder = 11;
-        const rightShoulder = 12;
         const leftHip = 23;
         const rightHip = 24;
-        // Approximate neck as midpoint between shoulders
-        const neck = (() => {
-          const l = results.poseLandmarks[leftShoulder];
-          const r = results.poseLandmarks[rightShoulder];
-          if (l && r) {
-            return {
-              x: (l.x + r.x) / 2,
-              y: (l.y + r.y) / 2,
-              z: (l.z + r.z) / 2,
-            };
-          }
-          return null;
-        })();
         // Draw lines: ears/eyes/nose to neck, neck to shoulders, neck to hips
         if (neck) {
           const drawToNeck = (idx: number) => {
@@ -194,8 +209,6 @@ export default function PoseWebcam({ onPose }: PoseWebcamProps) {
           };
           [leftEarIdx, rightEarIdx, leftEyeIdx, rightEyeIdx, nose].forEach(drawToNeck);
           // Draw neck to shoulders
-          const leftShoulderPt = results.poseLandmarks[leftShoulder];
-          const rightShoulderPt = results.poseLandmarks[rightShoulder];
           if (leftShoulderPt) {
             canvasCtx!.save();
             canvasCtx!.strokeStyle = '#2196f3';
@@ -267,21 +280,38 @@ export default function PoseWebcam({ onPose }: PoseWebcamProps) {
         <canvas ref={canvasRef} width={480} height={360} style={{ position: 'absolute', top: 0, left: 0 }} />
       </div>
       <Box sx={{ width: '100%', display: 'flex', justifyContent: 'center', mb: 2, flexDirection: 'column', alignItems: 'center' }}>
-        <Paper sx={{ p: 2, minWidth: 320, maxWidth: 400, background: '#23272b', color: '#fff', textAlign: 'center', boxShadow: 2, mb: 2 }}>
-          <Typography variant="h6" sx={{ mb: 1 }}>Head/Neck Flexion (Pitch)</Typography>
-          {neckFlexion ? (
-            <>
-              <Typography variant="h4" sx={{ color: neckFlexion.status === 'Good' ? '#4caf50' : neckFlexion.status === 'Warn' ? '#ff9800' : '#f44336', fontWeight: 700 }}>
-                {neckFlexion.angle.toFixed(1)}°
-              </Typography>
-              <Typography variant="subtitle1" sx={{ color: neckFlexion.status === 'Good' ? '#4caf50' : neckFlexion.status === 'Warn' ? '#ff9800' : '#f44336' }}>
-                {neckFlexion.status}
-              </Typography>
-            </>
-          ) : (
-            <Typography variant="body2" color="text.secondary">Not detected</Typography>
-          )}
-        </Paper>
+        <Box sx={{ display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, gap: 2, justifyContent: 'center', alignItems: 'stretch', width: '100%', mb: 2 }}>
+          <Paper sx={{ p: 2, minWidth: 160, maxWidth: 220, flex: 1, background: '#23272b', color: '#fff', textAlign: 'center', boxShadow: 2 }}>
+            <Typography variant="h6" sx={{ mb: 1 }}>Head/Neck Flexion (Pitch)</Typography>
+            {neckFlexion ? (
+              <>
+                <Typography variant="h4" sx={{ color: neckFlexion.status === 'Good' ? '#4caf50' : neckFlexion.status === 'Warn' ? '#ff9800' : '#f44336', fontWeight: 700 }}>
+                  {neckFlexion.angle.toFixed(1)}°
+                </Typography>
+                <Typography variant="subtitle1" sx={{ color: neckFlexion.status === 'Good' ? '#4caf50' : neckFlexion.status === 'Warn' ? '#ff9800' : '#f44336' }}>
+                  {neckFlexion.status}
+                </Typography>
+              </>
+            ) : (
+              <Typography variant="body2" color="text.secondary">Not detected</Typography>
+            )}
+          </Paper>
+          <Paper sx={{ p: 2, minWidth: 160, maxWidth: 220, flex: 1, background: '#23272b', color: '#fff', textAlign: 'center', boxShadow: 2 }}>
+            <Typography variant="h6" sx={{ mb: 1 }}>Cranio-Vertebral Angle (CVA)</Typography>
+            {cva ? (
+              <>
+                <Typography variant="h4" sx={{ color: cva.status === 'Good' ? '#4caf50' : cva.status === 'Warn' ? '#ff9800' : '#f44336', fontWeight: 700 }}>
+                  {cva.angle.toFixed(1)}°
+                </Typography>
+                <Typography variant="subtitle1" sx={{ color: cva.status === 'Good' ? '#4caf50' : cva.status === 'Warn' ? '#ff9800' : '#f44336' }}>
+                  {cva.status}
+                </Typography>
+              </>
+            ) : (
+              <Typography variant="body2" color="text.secondary">Not detected</Typography>
+            )}
+          </Paper>
+        </Box>
         <Button
           variant="contained"
           color="primary"
