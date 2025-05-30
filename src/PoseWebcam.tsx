@@ -2,6 +2,14 @@ import { useRef, useEffect } from 'react';
 import { Pose } from '@mediapipe/pose';
 import { Camera } from '@mediapipe/camera_utils';
 
+// Indices for upper body landmarks in MediaPipe Pose
+const UPPER_BODY_LANDMARKS = [
+  0, 1, 2, 3, 4, // nose, eyes, ears
+  5, 6, 7, 8,    // shoulders, elbows
+  9, 10, 11, 12, // wrists
+  23, 24         // hips
+];
+
 interface PoseWebcamProps {
   onPose?: (results: any) => void;
 }
@@ -33,6 +41,20 @@ export default function PoseWebcam({ onPose }: PoseWebcamProps) {
       canvasCtx!.save();
       canvasCtx!.clearRect(0, 0, canvasRef.current!.width, canvasRef.current!.height);
       canvasCtx!.drawImage(results.image, 0, 0, canvasRef.current!.width, canvasRef.current!.height);
+      // Draw upper body landmarks
+      if (results.poseLandmarks) {
+        canvasCtx!.fillStyle = '#00FF00';
+        canvasCtx!.strokeStyle = '#00FF00';
+        canvasCtx!.lineWidth = 2;
+        for (const idx of UPPER_BODY_LANDMARKS) {
+          const lm = results.poseLandmarks[idx];
+          if (lm) {
+            canvasCtx!.beginPath();
+            canvasCtx!.arc(lm.x * canvasRef.current!.width, lm.y * canvasRef.current!.height, 5, 0, 2 * Math.PI);
+            canvasCtx!.fill();
+          }
+        }
+      }
       canvasCtx!.restore();
     });
 
