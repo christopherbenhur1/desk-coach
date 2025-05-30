@@ -45,6 +45,8 @@ export default function PoseWebcam({ onPose }: PoseWebcamProps) {
   const [fsa, setFSA] = useState<{angle: number, status: string, confidence: number} | null>(null); // FSA state
   const [calibration, setCalibration] = useState<number | null>(null);
   const calibrationRef = useRef<number | null>(null); // <-- add ref for calibration
+  // Overall posture score state
+  const [postureScore, setPostureScore] = useState<number | null>(null);
 
   // Keep calibrationRef in sync with calibration state
   useEffect(() => {
@@ -325,6 +327,37 @@ export default function PoseWebcam({ onPose }: PoseWebcamProps) {
     };
   }, [onPose]);
 
+  // Compute overall posture score based on metrics and confidence
+  useEffect(() => {
+    if (!neckFlexion || !cva || !fsa) {
+      setPostureScore(null);
+      return;
+    }
+    // Normalize each metric to a 0-1 score (1 = best, 0 = worst)
+    function normNeckFlexion(angle: number) {
+      if (angle <= 15) return 1;
+      if (angle <= 20) return 0.5;
+      return 0;
+    }
+    function normCVA(angle: number) {
+      if (angle >= 48) return 1;
+      if (angle >= 44) return 0.5;
+      return 0;
+    }
+    function normFSA(angle: number) {
+      if (angle <= 15) return 1;
+      if (angle <= 20) return 0.5;
+      return 0;
+    }
+    // Weighted score for each metric
+    const neckScore = normNeckFlexion(neckFlexion.angle) * neckFlexion.confidence;
+    const cvaScore = normCVA(cva.angle) * cva.confidence;
+    const fsaScore = normFSA(fsa.angle) * fsa.confidence;
+    // Give extra weight to neck flexion (e.g., 50%), others 25% each
+    const score = (neckScore * 0.5 + cvaScore * 0.25 + fsaScore * 0.25);
+    setPostureScore(score);
+  }, [neckFlexion, cva, fsa]);
+
   // Table of all landmarks and their raw values
   return (
     <div style={{ display: 'flex', gap: 40, alignItems: 'flex-start', justifyContent: 'center', flexWrap: 'wrap', width: '100%' }}>
@@ -389,6 +422,9 @@ export default function PoseWebcam({ onPose }: PoseWebcamProps) {
             )}
           </Paper>
         </Box>
+        <Typography variant="h6" sx={{ mb: 1, color: '#90caf9' }}>
+          Overall Posture Score: {postureScore !== null ? (postureScore * 100).toFixed(0) + '%' : 'N/A'}
+        </Typography>
         <Button
           variant="contained"
           color="primary"
