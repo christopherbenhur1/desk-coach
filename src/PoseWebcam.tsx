@@ -47,6 +47,7 @@ export default function PoseWebcam({ onPose }: PoseWebcamProps) {
   const calibrationRef = useRef<number | null>(null); // <-- add ref for calibration
   // Overall posture score state
   const [postureScore, setPostureScore] = useState<number | null>(null);
+  const [postureClassification, setPostureClassification] = useState<string | null>(null); // Posture classification state
 
   // Keep calibrationRef in sync with calibration state
   useEffect(() => {
@@ -68,6 +69,13 @@ export default function PoseWebcam({ onPose }: PoseWebcamProps) {
       localStorage.setItem('deskcoach-neck-calibration', calibration.toString());
     }
   }, [calibration]);
+
+  // Request notification permission on mount if not already granted/denied
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  }, []);
 
   // Helper: calculate angle between two points and vertical (in degrees, 0° = upright)
   function angleToVertical(a: any, b: any) {
@@ -331,6 +339,7 @@ export default function PoseWebcam({ onPose }: PoseWebcamProps) {
   useEffect(() => {
     if (!neckFlexion || !cva || !fsa) {
       setPostureScore(null);
+      setPostureClassification(null);
       return;
     }
     // Normalize each metric to a 0-1 score (1 = best, 0 = worst)
@@ -356,7 +365,108 @@ export default function PoseWebcam({ onPose }: PoseWebcamProps) {
     // Give extra weight to neck flexion (e.g., 50%), others 25% each
     const score = (neckScore * 0.5 + cvaScore * 0.25 + fsaScore * 0.25);
     setPostureScore(score);
+    // Classify posture based on score
+    if (score >= 0.7) {
+      setPostureClassification('Good');
+    } else if (score >= 0.4) {
+      setPostureClassification('Warning');
+    } else {
+      setPostureClassification('Poor');
+    }
   }, [neckFlexion, cva, fsa]);
+
+  // Track how long posture is not good and trigger notification if needed
+  const postureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const postureNotGoodStartRef = useRef<number | null>(null);
+  const [notified, setNotified] = useState(false);
+
+  // Helper to trigger notification
+  const triggerPostureNotification = () => {
+    try {
+      const audio = new Audio('/notification-chirp.mp3');
+      audio.play().catch(e => console.warn('Audio play error:', e));
+      if (Notification.permission === 'granted') {
+        new Notification('Desk Coach', {
+          body: 'Your posture has not been good for over 5 seconds. Please adjust!'
+        });
+        console.log('Desk Coach notification fired');
+      } else if (Notification.permission !== 'denied') {
+        Notification.requestPermission().then(permission => {
+          if (permission === 'granted') {
+            new Notification('Desk Coach', {
+              body: 'Your posture has not been good for over 5 seconds. Please adjust!'
+            });
+            console.log('Desk Coach notification fired after permission');
+          } else {
+            console.log('Desk Coach notification permission denied');
+          }
+        });
+      } else {
+        console.log('Desk Coach notification not fired: permission denied');
+      }
+    } catch (e) {
+      console.error('Desk Coach notification error:', e);
+    }
+    setNotified(true);
+    if (postureTimerRef.current) {
+      clearInterval(postureTimerRef.current);
+      postureTimerRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    if (postureClassification === 'Good' || postureClassification === null) {
+      postureNotGoodStartRef.current = null;
+      setNotified(false);
+      if (postureTimerRef.current) {
+        clearInterval(postureTimerRef.current);
+        postureTimerRef.current = null;
+      }
+      return;
+    }
+    // If posture is not good, start or continue timer
+    if (postureNotGoodStartRef.current === null) {
+      postureNotGoodStartRef.current = Date.now();
+    }
+    // If already notified, do nothing
+    if (notified) return;
+    // Check every 500ms for notification trigger
+    if (!postureTimerRef.current) {
+      postureTimerRef.current = setInterval(() => {
+        if (postureNotGoodStartRef.current) {
+          const elapsed = Date.now() - postureNotGoodStartRef.current;
+          if (elapsed >= 5000) {
+            triggerPostureNotification();
+          }
+        }
+      }, 500);
+    }
+    // Cleanup on unmount
+    return () => {
+      if (postureTimerRef.current) {
+        clearInterval(postureTimerRef.current);
+        postureTimerRef.current = null;
+      }
+    };
+  }, [postureClassification, notified]);
+
+  // Page Visibility API: fire notification immediately if enough time elapsed while hidden
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible' &&
+          postureClassification !== 'Good' &&
+          postureClassification !== null &&
+          !notified &&
+          postureNotGoodStartRef.current !== null) {
+        const elapsed = Date.now() - postureNotGoodStartRef.current;
+        if (elapsed >= 5000) {
+          triggerPostureNotification();
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [postureClassification, notified]);
 
   // Table of all landmarks and their raw values
   return (
@@ -425,6 +535,11 @@ export default function PoseWebcam({ onPose }: PoseWebcamProps) {
         <Typography variant="h6" sx={{ mb: 1, color: '#90caf9' }}>
           Overall Posture Score: {postureScore !== null ? (postureScore * 100).toFixed(0) + '%' : 'N/A'}
         </Typography>
+        {postureClassification && (
+          <Typography variant="subtitle1" sx={{ color: postureClassification === 'Good' ? '#4caf50' : postureClassification === 'Warning' ? '#ff9800' : '#f44336', fontWeight: 700, mb: 1 }}>
+            {postureClassification === 'Good' ? 'Good Posture' : postureClassification === 'Warning' ? 'Warning: Check Your Posture' : 'Poor Posture!'}
+          </Typography>
+        )}
         <Button
           variant="contained"
           color="primary"
