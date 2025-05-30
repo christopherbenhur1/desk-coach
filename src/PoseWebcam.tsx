@@ -184,12 +184,12 @@ export default function PoseWebcam({ onPose }: PoseWebcamProps) {
 
   // Table of all landmarks and their raw values
   return (
-    <div style={{ display: 'flex', gap: 24 }}>
-      <div style={{ position: 'relative', width: 480, height: 360 }}>
+    <div style={{ display: 'flex', gap: 40, alignItems: 'flex-start', justifyContent: 'center', flexWrap: 'wrap', width: '100%' }}>
+      <div style={{ position: 'relative', width: 480, height: 360, flex: '0 0 auto' }}>
         <video ref={videoRef} style={{ display: 'none' }} width={480} height={360} />
         <canvas ref={canvasRef} width={480} height={360} style={{ position: 'absolute', top: 0, left: 0 }} />
       </div>
-      <TableContainer component={Paper} sx={{ maxHeight: 360, minWidth: 260, background: '#222' }}>
+      <TableContainer component={Paper} sx={{ maxHeight: 360, minWidth: 480, width: 520, flex: '0 1 520px', background: '#222', boxShadow: 3 }}>
         <Table stickyHeader size="small" aria-label="pose landmarks table">
           <TableHead>
             <TableRow>
