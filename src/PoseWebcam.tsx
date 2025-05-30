@@ -1,6 +1,13 @@
 import { useRef, useEffect, useState } from 'react';
 import { Pose } from '@mediapipe/pose';
 import { Camera } from '@mediapipe/camera_utils';
+import Table from '@mui/material/Table';
+import TableBody from '@mui/material/TableBody';
+import TableCell from '@mui/material/TableCell';
+import TableContainer from '@mui/material/TableContainer';
+import TableHead from '@mui/material/TableHead';
+import TableRow from '@mui/material/TableRow';
+import Paper from '@mui/material/Paper';
 
 // Indices for upper body landmarks in MediaPipe Pose
 const UPPER_BODY_LANDMARKS = [
@@ -182,30 +189,30 @@ export default function PoseWebcam({ onPose }: PoseWebcamProps) {
         <video ref={videoRef} style={{ display: 'none' }} width={480} height={360} />
         <canvas ref={canvasRef} width={480} height={360} style={{ position: 'absolute', top: 0, left: 0 }} />
       </div>
-      <div style={{ maxHeight: 360, overflow: 'auto', minWidth: 260 }}>
-        <table style={{ fontSize: 12, borderCollapse: 'collapse', width: '100%' }}>
-          <thead>
-            <tr style={{ background: '#222', color: '#fff' }}>
-              <th style={{ padding: 4, border: '1px solid #444' }}>Part</th>
-              <th style={{ padding: 4, border: '1px solid #444' }}>x</th>
-              <th style={{ padding: 4, border: '1px solid #444' }}>y</th>
-              <th style={{ padding: 4, border: '1px solid #444' }}>z</th>
-              <th style={{ padding: 4, border: '1px solid #444' }}>visibility</th>
-            </tr>
-          </thead>
-          <tbody>
+      <TableContainer component={Paper} sx={{ maxHeight: 360, minWidth: 260, background: '#222' }}>
+        <Table stickyHeader size="small" aria-label="pose landmarks table">
+          <TableHead>
+            <TableRow>
+              <TableCell sx={{ color: '#fff', background: '#222', borderColor: '#444' }}>Part</TableCell>
+              <TableCell sx={{ color: '#fff', background: '#222', borderColor: '#444' }}>x</TableCell>
+              <TableCell sx={{ color: '#fff', background: '#222', borderColor: '#444' }}>y</TableCell>
+              <TableCell sx={{ color: '#fff', background: '#222', borderColor: '#444' }}>z</TableCell>
+              <TableCell sx={{ color: '#fff', background: '#222', borderColor: '#444' }}>visibility</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
             {landmarks.map((lm, i) => (
-              <tr key={i} style={{ background: i % 2 ? '#333' : '#222', color: '#fff' }}>
-                <td style={{ padding: 4, border: '1px solid #444' }}>{LANDMARK_NAMES[i] || i}</td>
-                <td style={{ padding: 4, border: '1px solid #444' }}>{lm.x?.toFixed(4)}</td>
-                <td style={{ padding: 4, border: '1px solid #444' }}>{lm.y?.toFixed(4)}</td>
-                <td style={{ padding: 4, border: '1px solid #444' }}>{lm.z?.toFixed(4)}</td>
-                <td style={{ padding: 4, border: '1px solid #444' }}>{lm.visibility?.toFixed(4)}</td>
-              </tr>
+              <TableRow key={i} sx={{ background: i % 2 ? '#333' : '#222' }}>
+                <TableCell sx={{ color: '#fff', borderColor: '#444' }}>{LANDMARK_NAMES[i] || i}</TableCell>
+                <TableCell sx={{ color: '#fff', borderColor: '#444' }}>{lm.x?.toFixed(4)}</TableCell>
+                <TableCell sx={{ color: '#fff', borderColor: '#444' }}>{lm.y?.toFixed(4)}</TableCell>
+                <TableCell sx={{ color: '#fff', borderColor: '#444' }}>{lm.z?.toFixed(4)}</TableCell>
+                <TableCell sx={{ color: '#fff', borderColor: '#444' }}>{lm.visibility?.toFixed(4)}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      </div>
+          </TableBody>
+        </Table>
+      </TableContainer>
     </div>
   );
 }
